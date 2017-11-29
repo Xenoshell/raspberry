@@ -1,6 +1,4 @@
 import sys
-#import pdb
-#import sip
 from PyQt5 import QtCore , QtWidgets, QtGui, QtMultimedia, QtMultimediaWidgets
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import QApplication, QPushButton, QMainWindow
@@ -27,16 +25,9 @@ class Camera(QObject):
             
     
     def startVid(self):
-        #pdb.set_trace()
-        #self.cam.load()
         self.camvfind.setVisible(True)
         
         self.cam.setViewfinder(self.camvfind)
-        
-        #self.cam.load()
-        #self.camvfindset.setResolution(1280,720)
-        #print(self.cam.supportedViewfinderFrameRateRanges(self.camvfind))
-        #self.camvfindset.setMinimumFrameRate(15)
 
         self.cam.setCaptureMode(self.cammode)
         self.cam.start()
@@ -50,7 +41,6 @@ if __name__ == '__main__':
     
     cam.iniCamera()
     
-    #sip.enableoverflowchecking()
     cam.startVid()
     
     sys.exit(app.exec_())
