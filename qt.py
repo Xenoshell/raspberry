@@ -25,6 +25,8 @@ class Camera(QObject):
             
     
     def startVid(self):
+        self.camimgcap.CaptureDestination(2)
+        
         self.camvfind.setVisible(True)
         
         self.cam.setViewfinder(self.camvfind)
