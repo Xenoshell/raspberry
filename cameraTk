@@ -1,0 +1,166 @@
+from __future__ import print_function
+from PIL import Image
+from PIL import ImageTk
+from time import sleep
+import tkinter as tki
+import threading
+import datetime
+import imutils
+import cv2
+import os
+import RPi.GPIO as GPIO
+import sys
+
+class Microscope:
+    def __init__(self, vs, outputPath):
+        #Raspberry Pi Steppermotor Init
+        self.DIR = 20   # Direction GPIO Pin
+        self.STEP = 21  # Step GPIO Pin
+        self.CW = 1     # Clockwise Rotation
+        self.CCW = 0    # Counterclockwise Rotation
+        self.SPR = 200  # Steps per Revolution (360 / 1.8)  
+        self.M0 = 14    # Microstepping
+        self.M1 = 15    
+        self.M2 = 18
+        self.EN = 2    
+
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(self.DIR, GPIO.OUT)
+        GPIO.setup(self.STEP, GPIO.OUT)
+        GPIO.output(self.DIR, self.CW)
+
+        GPIO.setup(self.M0, GPIO.OUT)
+        GPIO.setup(self.M1, GPIO.OUT)
+        GPIO.setup(self.M2, GPIO.OUT)
+        GPIO.setup(self.EN, GPIO.OUT)
+
+        GPIO.output(self.M0, GPIO.LOW)
+        GPIO.output(self.M1, GPIO.LOW)
+        GPIO.output(self.M2, GPIO.LOW)
+        GPIO.output(self.EN, GPIO.HIGH)
+        
+        self.step_count = 25
+        self.delay = .007 #.0208
+        
+        #store the video stream object and output path, then init
+        #the most recently read frame, thread for reading frames,
+        #the thread stop event
+        self.vs = vs # vs = VideoStream
+        self.outputPath = outputPath
+        self.frame = None
+        self.thread = None
+        self.stopEvent = None
+        
+        #init the root window and image panel
+        self.root = tki.Tk()
+        self.panel = None
+        #create a button, that when pressed, will take the current
+        #frame and save it to file
+        btn= tki.Button(self.root, text="Snapshot!", command=self.takeSnapshot)
+        btn.grid(row = 1, column = 2, sticky = tki.S)
+        
+        #buttons that control the steppermotor
+        btnturnl= tki.Button(self.root, text="Left", command = self.EinsRechts)
+        btnturnl.grid(row = 1, column = 1, sticky = tki.SW)
+        
+        btnturnl2= tki.Button(self.root, text="Two Left", command = self.ZweiRechts)
+        btnturnl2.grid(row = 1, column = 0, sticky = tki.SW)
+        
+        btnturnr= tki.Button(self.root, text="Right", command = self.EinsLinks)
+        btnturnr.grid(row = 1, column = 3, sticky = tki.SE)
+        
+        btnturnr2= tki.Button(self.root, text="Two Right", command = self.ZweiLinks)
+        btnturnr2.grid(row = 1, column= 4, sticky = tki.SE)
+        
+        self.root.grid_rowconfigure(1, weight = 1)
+        
+        #start a thread that constantly pools the video sensor for
+        #the most recently read frame
+        self.stopEvent = threading.Event()
+        self.thread = threading.Thread(target=self.videoLoop, args=())
+        self.thread.start()
+        
+        #set a callback to handle when the window is closed
+        self.root.wm_title("Mikroskopsteuerung")
+        self.root.wm_protocol("WM_DELETE_WINDOW", self.onClose)
+        
+    def videoLoop(self):
+        try:
+            #keep looping over frames until we are instructed to stop
+            while not self.stopEvent.is_set():
+                #grab the frame from the video stream and resize it to
+                #have a maximum width of 300 pixels
+                self.frame = self.vs.read()
+                self.frame = imutils.resize(self.frame, width= 300)
+                
+                #OpenCV represents images in BGR order; however PIL
+                #represents images in RGB order, so we need to swap
+                #the channels, then convert to PIL and ImageTK format
+                image = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
+                image = Image.fromarray(image)
+                image = ImageTk.PhotoImage(image)
+                
+                #if the panel is not None, we need to initialize it
+                if self.panel is None:
+                    self.panel = tki.Label(image=image)
+                    self.panel.image = image
+                    self.panel.grid(row = 0, column = 0, columnspan = 5, sticky = tki.N)
+                    
+                #otherwise, simply update the panel
+                else:
+                    self.panel.configure(image=image)
+                    self.panel.image = image
+                    
+        except RuntimeError:
+            print("[INFO] caught a RuntimeError")
+            
+    def takeSnapshot(self):
+        #grab the current timestamp and use it to construct the
+        #output path
+        ts = datetime.datetime.now()
+        filename = "{}.jpg".format(ts.strftime("%Y-%m-%d_%H-%M-%S"))
+        p = os.path.sep.join((self.outputPath, filename))
+        
+        #save the file
+        cv2.imwrite(p, self.frame.copy())
+        print("[INFO] saved{}".format(filename))
+        
+    def EinsLinks(self):
+        
+        GPIO.output(self.EN, GPIO.LOW)
+        GPIO.output(self.DIR, self.CCW)
+        for x in range(self.step_count):
+            GPIO.output(self.STEP, GPIO.HIGH)
+            sleep(self.delay)
+            GPIO.output(self.STEP, GPIO.LOW)
+            sleep(self.delay)
+        GPIO.output(self.EN, GPIO.HIGH)
+
+    def ZweiLinks(self):
+
+        self.EinsLinks()
+        self.EinsLinks()
+    
+    def EinsRechts(self):
+        
+        GPIO.output(self.EN, GPIO.LOW)
+        GPIO.output(self.DIR, self.CW)
+        for x in range(self.step_count):
+            GPIO.output(self.STEP, GPIO.HIGH)
+            sleep(self.delay)
+            GPIO.output(self.STEP, GPIO.LOW)
+            sleep(self.delay)
+        GPIO.output(self.EN, GPIO.HIGH)
+
+    def ZweiRechts(self):
+        
+        self.EinsRechts()
+        self.EinsRechts()
+    
+    def onClose(self):
+        #set the stop event, cleanup the camera, and allow the rest of
+        #the quit process to continue
+        print("[INFO] closing...")
+        self.stopEvent.set()
+        self.vs.stop()
+        self.root.quit()
